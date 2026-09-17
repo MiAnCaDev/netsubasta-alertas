@@ -35,6 +35,9 @@ if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
     echo "`date '+%T %D'` INFO: Fin $v_nombre"
     exit 1
 fi
+# Limpiar valores 
+TOKEN=$(echo "$TOKEN" | tr -d '[:space:]\r\n')
+CHAT_ID=$(echo "$CHAT_ID" | tr -d '[:space:]\r\n')
 
 #PASO003: Leer el estado específico de n8n desde el JSON (por defecto 'true')
 echo "`date '+%T %D'` INFO: Consultando servicio web $URL_CHECK..."
@@ -50,15 +53,15 @@ fi
 echo "`date '+%T %D'` INFO: Estado del servicio evaluado: '$ESTADO_SERVICIO'"
 
 #PASO004: Comprobamos el estado
-Notificamos si el servicio está activo
+#Notificamos si el servicio está activo
 if [[ "$ESTADO_SERVICIO" == "true" ]]; then
 	echo "`date '+%T %D'` INFO: Ejecutando script de subastas..."
 
 	# 1. Ejecutamos Python y leemos la salida cambiando el delimitador a la línea de '='
 	/usr/bin/python3 "$PYTHON_SCRIPT" | awk 'BEGIN{RS="========================================================================\n"} {print $0 "\0"}' | while IFS= read -r -d '' VEHICULO; do
 		
-		# Omitir bloques vacíos
-		if [ -z "$(echo -e "$VEHICULO" | tr -d '[:space:]')" ]; then
+		# Omitir bloques vacíos o cabeceras que no contengan un vehículo ("NUEVO:")
+		if [[ "$VEHICULO" != *"NUEVO:"* ]]; then
 			continue
 		fi
 
@@ -66,13 +69,15 @@ if [[ "$ESTADO_SERVICIO" == "true" ]]; then
 		echo "$VEHICULO"
 
 		# 2. Enviar por Telegram codificando la URL con --data-urlencode
-		curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+		# 2. Enviar por Telegram registrando salida de error
+		CURL_OUTPUT=$(curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
 			-d "chat_id=${CHAT_ID}" \
 			-d "disable_web_page_preview=1" \
-			--data-urlencode "text=${VEHICULO}" > /dev/null
+			--data-urlencode "text=${VEHICULO}" 2>&1)
+		CURL_STATUS=$?
 
-		if [ $? -ne 0 ]; then 
-			echo "`date '+%T %D'` ERROR: Fallo al notificar error en el curl"
+		if [ $CURL_STATUS -ne 0 ]; then 
+			echo "`date '+%T %D'` ERROR: Fallo curl (Código $CURL_STATUS): $CURL_OUTPUT"
 		fi
 		
 		# Pausa opcional para evitar límite de rate limit de Telegram
